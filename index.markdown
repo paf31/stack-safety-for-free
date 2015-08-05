@@ -1,16 +1,19 @@
-Title:    Stack Safety for Free 
-Author:   Phil Freeman
-Date:     August 3, 2015
-Abstract: Free monads are a useful tool for abstraction, separating specification from interpretation.
-          However, a naive free monad implementation can lead to stack overflow depending on the evaluation
-          model of the host language. This paper develops a stack-safe free monad transformer in PureScript,
-          an eager language compiling to Javascript, and demonstrates certain applications:
-          a safe implementation of coroutines, and a generic mechanism for building stack-safe control operators.
+---
+title:  Stack Safety for Free 
+author: Phil Freeman
+date:   August 3, 2015
+abstract: |
+  Free monads are a useful tool for abstraction, separating specification from interpretation.
+  However, a naive free monad implementation can lead to stack overflow depending on the evaluation
+  model of the host language. This paper develops a stack-safe free monad transformer in _PureScript_,
+  an eager language compiling to Javascript, and demonstrates certain applications -
+  a safe implementation of coroutines, and a generic mechanism for building stack-safe control operators.
+---
 
 ## Introduction
 
 Techniques from pure functional programming languages such as Haskell have been making their way into mainstream
-programming, slowly but surely, in the form of projects like [Scalaz](scalaz) in Scala, and packages
+programming, slowly but surely, in the form of projects like [Scalaz] in Scala, and packages
 like [Fantasy Land] and [FolkTale] in Javascript. Abstractions such as monoids, functors, applicative functors, monads,
 arrows, etc. afford a level of expressiveness which can give great productivity gains, and improved guarantees of
 program correctness. 
@@ -60,7 +63,7 @@ available to the programmer at each step are described by the functor `f`.
 
     instance (Functor f) => Functor (Free f) where
       fmap f = Free . either f (fmap (fmap f)) . unFree
-
+    
     instance (Functor f) => Monad (Free f) where
       return = Free . Left
       m >>= f = either f (Free . Right . fmap (>>= f)) (unFree m)
@@ -133,12 +136,20 @@ separated the meaning of our computations from the syntax that describes them.
 
 The free monad construction given above can be generalized to a free monad transformer, `FreeT`:
 
-    newtype FreeT f m a = FreeT { unFreeT :: m (Either a (f (Free f a))) }
+    newtype FreeT f m a = FreeT { unFreeT :: m (Either a (f (FreeT f m a))) }
 
 The free monad transformer allows us to interleave effects from the base monad `m` at each step of the computation.
 
-_TODO_: define the `Monad` instance and `runFreeT`
+The `Functor` and `Monad` instances for `FreeT` look similar to the instances for `Free`. In addition, we now also have an instance for
+`MonadTrans`, the type class of monad transformers:
 
+    instance (Functor f, Functor m) => Functor (FreeT f m) where
+      fmap f = FreeT . fmap (either f (fmap (fmap f))) . unFreeT
+    
+    instance (Functor f, Monad m) => Monad (Co f m) where
+      return a = FreeT (return (Left a))
+      m >>= f = unFreeT m >>= either f (FreeT . return . Right . fmap (>>= f))
+    
     instance MonadTrans (FreeT f) where
       lift = FreeT . fmap Left
 
@@ -307,6 +318,10 @@ useful generalization of tail recursion to monadic contexts. We can rewrite `pow
         tell n
         return (Left (m - 1))
 
+In [Uustalu], monads supporting a `tailRecM` operation are called _completely iterative_, although the conditions for validity of instances
+is different. There they are used to capture monads supporting the side-effect of _partiality_ in a total language. Our instance for `Identity`
+would be considered unsafe, for example.
+
 ## Interpreting Free Monads Safely
 
 Tail recursive monads provide a safe alternative to the `runFree` function, which previously was restricted to a handful of monads.
@@ -355,9 +370,51 @@ We can reduce the process of interpreting the computation to a tail recursive fu
                               FreeT f m a -> 
                               m a
 
-## The Completely Iterative Monad Transformer
-
 ## Stack Safety for Free
+
+[Uustalu] defines the _free completely-iterative monad transformer_. In Haskell, it might be defined as:
+
+    newtype IterT m a = IterT { runIterT :: m (Either (IterT f m a) a) }
+
+where the fixed point is assumed to be the greatest fixed point.
+
+This looks a lot like our definition of the free monad transformer for the `Identity` functor, but there, the
+least fixed point was implied. However, our encoding of the free monad transformer in PureScript allows for 
+infinite values, so we can consider our `FreeT Identity m` as embedding in `IterT m`. In PureScript, we will
+take `FreeT Identity` as our encoding of the free completely-iterative monad transformer:
+
+    type IterT = FreeT Identity
+
+`IterT m` is stack-safe for any monad `m`, thanks to the `Gosub` trick. Also, `IterT m` can be interpreted in
+`m` using `runFreeT return`, and this interpretation is stack-safe whenever `m` is a tail-recursive monad.
+Since `IterT` is a monad transformer, we can interpret any computation in `m` inside `IterT m`.
+
+This means that for any tail-recursive monad `m`, we can work instead in `IterT m`, including deeply nested 
+left and right associated binds, without worrying about stack overflow. When our computation is complete,
+we can use `runFreeT` to move back to `m`.
+
+For example, this computation quickly terminates with a stack overflow:
+
+    main = go 100000
+      where
+      go n | n <= 0 = return unit
+      go n = do
+       print n
+       go (n - 2)
+       go (n - 1)
+
+but can be made productive, simply by lifting computations into `IterT`:
+
+    main = runFreeT return $ go 100000
+      where
+      go n | n <= 0 = return unit
+      go n = do
+       lift (print n)
+       go (n - 2)
+       go (n - 1)
+
+Note that this would not be possible by using a trampolined free monad, since the `Eff` monad has no equivalent 
+monad transformer.
 
 ## Application: Coroutines
 
@@ -385,10 +442,10 @@ We can define a type `Producer` of coroutines which produce values and perform c
       emit "Hello World"
 
 We can vary the underlying `Functor` to construct coroutines which produce values, consume values, fork child coroutines, 
-join coroutines, and combinations of these. This is described in [1], where free monad _transformers_ are used to build a 
+join coroutines, and combinations of these. This is described in [Blazevic], where free monad _transformers_ are used to build a 
 library of composable coroutines and combinators which support effects in some base monad. 
 
-Given a stack-safe implementation of the free monad transformer, it becomes simple to translate the coroutines defined in [1]
+Given a stack-safe implementation of the free monad transformer, it becomes simple to translate the coroutines defined in [Blazevic]
 into PureScript. We can define a functor for awaiting values, and a coroutine type `Consumer`:
 
     data Await i a = Await (i -> a)
@@ -411,10 +468,10 @@ Here is an example of a `Consumer` which repeatedly awaits a new value before lo
 The use of the safe `FreeT` implementation, and `MonadRec` make these coroutines stack-safe. They can be connected and run 
 using a constant amount of stack:
 
-    main = runProcess (producer $$ consumer)
+    main = runFreeT id (producer $$ consumer)
 
 `$$` is an operator defined in the `purescript-coroutines` library, which supports a handful of combinators for connecting producers, 
-consumers and transformers, as well as more powerful, generic coroutine machinery taken from [1]. Running this example will generate
+consumers and transformers, as well as more powerful, generic coroutine machinery taken from [Blazevic]. Running this example will generate
 an infinite stream of the string `"Hello World"` printed to the console, interleaved with the debug message `"Emitting a value..."`.
 
 In a pure functional language like PureScript, targeting a single-threaded language like Javascript, coroutines built using `FreeT` 
@@ -423,10 +480,67 @@ for performing tasks like non-blocking file and network IO.
 
 ## Application: Lifting Control Operators
 
+The fact that `IterT m` is stack-safe for any monad `m` provides a way to turn implementations of _control operators_ with poor stack
+usage, into implementations with good stack usage for free.
+
+By a control operator, we are referring to functions such as `mapM_`, `foldM`, `replicateM` and `iterateM`, which work over an arbitrary monad.
+
+Consider, for example, the following definition of `replicateM_`, which replicates a monadic action some number of times, ignoring its results:
+
+    replicateM_ :: forall m a. (Monad m) => Int -> m a -> m Unit
+    replicateM_ 0 _ = return Nil
+    replicateM_ n m = do
+      _ <- m
+      replicateM (n - 1) m
+
+This function is not stack-safe for large inputs. There is a simple, safe implementation of `replicateM` where the `Monad` constraint 
+is strengthened to `MonadRec`, but for the purposes of demonstration, let's see how we can _derive_ a safe `replicateM` instead, using `IterT`.
+
+It is as simple as lifting our monadic action from `m` to `IterT m` before the call to `replicateM`, and lowering it down using `runFreeT return` afterwards:
+
+    safeReplicateM_ :: forall m a. (MonadRec m) => Int -> m a -> m Unit
+    safeReplicateM_ n m = runFree return (replicateM_ n (lift m))
+
+We can even capture this general technique as follows. The `Operator` type class captures those functions which work on arbitrary monads, i.e. 
+control operators:
+
+    type MMorph f g = forall a. f a -> g a
+    
+    class Operator o where
+      mapO :: forall m n. MMorph m n -> MMorph n m -> o m -> o n
+
+Here, `MMorph` represents a monad morphism. `mapO` is given a pair of monad morphisms representing an embedding-retraction pair, and is responsible for
+changing the monad being operated on accordingly.
+
+In practice, our two monads will be `m` and `IterT m` for some tail recursive monad `m`:
+
+    safely :: forall o m a. (Operator o, MonadRec m) => 
+                            (forall t. (Monad t) => o t) -> 
+                            o m
+    safely o = mapO runProcess lift o
+
+`safely` allows us to write a control operator for any `Monad`, trading the generality of a `Monad` constraint for the ability to be able to write code
+which is not necessarily stack-safe, and returns an equivalent combinator which works with any `MonadRec`, safely.
+
+Given this combinator, we can reimplement our safe version of `replicateM_` by defining a wrapper type and an instance of `Operator`:
+
+    newtype Replicator m = Replicator (forall a. Int -> m a -> m Unit)
+    
+    instance replicator :: Operator Replicator where
+      mapO to fro (Replicator r) = Replicator \n m -> to (r n (fro m))
+    
+    runReplicator :: forall m a. Replicator m -> Int -> m a -> m Unit
+    runReplicator (Replicator r) = r
+    
+    safeReplicateM_ :: forall m a. (MonadRec m) => Int -> m a -> m Unit
+    safeReplicateM_ = runReplicator (safely (Replicator replicateM_)) 
+
+We can use the `safely` combinator to derive safe versions of many other control operators automatically.
+
 ## References
 
-[scalaz]: https://github.com/scalaz/scalaz "Scalaz" 
-
-[Blazevic]: "Coroutine Pipelines", by Mario Blazevic, in _The Monad Reader_, _Issue 19_.
-
-[Bjarnason]: "Stackless Scala With Free Monads", by Runar Oli Bjarnason.
+- \[Scalaz\]: Scalaz GitHub repository 
+  [github.com/scalaz/scalaz](https://github.com/scalaz/scalaz)
+- \[Blazevic\]: Coroutine Pipelines, by Mario Blazevic, in The Monad Reader, Issue 19.
+- \[Bjarnason\]: Stackless Scala With Free Monads, by Runar Oli Bjarnason.
+- \[Uustalu\]: Partiality is an Effect, by Venanzio Capretta, Thorsten Altenkirch and Tarmo Uustalu.
