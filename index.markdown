@@ -25,17 +25,21 @@ One example of a desirable abstraction is the _free monad_ for a functor `f`. Fr
 of a monad (by specifying the base functor `f`), from its implementation. However, a naive translation of the standard 
 Haskell definition
 
-    newtype Free f a = Free { unFree :: Either a (f (Free f a)) }
-    
-    runFree :: (forall a. f a -> m a) -> Free f a -> m a
-    runFree phi = either return ((>>= (runFree phi)) . phi) . unFree
+~~~ {.haskell}
+newtype Free f a = Free { unFree :: Either a (f (Free f a)) }
+
+runFree :: (forall a. f a -> m a) -> Free f a -> m a
+runFree phi = either return ((>>= (runFree phi)) . phi) . unFree
+~~~
 
 to languages like Scala or C#, can lead to stack overflows, both during construction of a computation of type `Free f a`, 
 and during interpretation.
 
 The free monad can be generalized to a monad transformer, where a monad `m` is used to track effects at each step of the computation:
 
-    newtype FreeT f m a = FreeT { unFreeT :: m (Either a (f (Free f a))) }
+~~~ {.haskell}
+newtype FreeT f m a = FreeT { unFreeT :: m (Either a (f (Free f a))) }
+~~~
 
 Current attempts to generalize stack-safe implementations of the free monad to the free monad transformer `FreeT` have met with difficulty.
 In this paper, we'll construct a stack-safe implementation of the free monad transformer, with a restriction on the class of monads which
@@ -54,19 +58,23 @@ construct a `Monad` for free, which can be used to combine those terms.
 
 The definition of the free monad in Haskell is given as a recursive data type:
 
-    newtype Free f a = Free { unFree :: Either a (f (Free f a)) }
+~~~ {.haskell}
+newtype Free f a = Free { unFree :: Either a (f (Free f a)) }
+~~~
 
 A computation of type `Free f a` is either complete, returning value of type `a`, or a step, where the operations 
 available to the programmer at each step are described by the functor `f`.
 
 `Free` is easily made into a `Monad` whenever `f` is a `Functor`:
 
-    instance (Functor f) => Functor (Free f) where
-      fmap f = Free . either f (fmap (fmap f)) . unFree
-    
-    instance (Functor f) => Monad (Free f) where
-      return = Free . Left
-      m >>= f = either f (Free . Right . fmap (>>= f)) (unFree m)
+~~~ {.haskell}
+instance (Functor f) => Functor (Free f) where
+  fmap f = Free . either f (fmap (fmap f)) . unFree
+
+instance (Functor f) => Monad (Free f) where
+  return = Free . Left
+  m >>= f = either f (Free . Right . fmap (>>= f)) (unFree m)
+~~~
 
 If `Free f` represents syntax trees for a language with operations described by `f`, then the monadic bind function 
 implements substitution at the leaves of the tree, substituting new computations depending on the result of the first 
@@ -74,15 +82,17 @@ computation.
 
 For example, we might choose the following functor as our base functor:
 
-    data CounterF a 
-      = Increment a
-      | Read (Int -> a)
-      | Reset a
-      
-    instance Functor CounterF where
-      fmap f (Increment a) = Increment (f a)
-      fmap f (Read k) = Read (f <<< k)
-      fmap f (Reset a) = Reset (f a)
+~~~ {.haskell}
+data CounterF a 
+  = Increment a
+  | Read (Int -> a)
+  | Reset a
+  
+instance Functor CounterF where
+  fmap f (Increment a) = Increment (f a)
+  fmap f (Read k) = Read (f <<< k)
+  fmap f (Reset a) = Reset (f a)
+~~~
 
 This functor describes three possible operations on a simulated counter: `Increment`, which increments the counter by one, 
 `Read`, which provides the current value of the counter, and `Reset` which resets the counter to zero.
@@ -92,27 +102,31 @@ the type `a` will be instantiated to `Free f a`, the next step of the computatio
 
 We can define constructors for our three operations, and a synonym for our free monad:
 
-    type Counter = Free CounterF
-    
-    liftFree :: (Functor f) => f a -> Free f a
-    liftFree fa = Free . Right . fmap return
-    
-    increment :: Counter ()
-    increment = liftFree (Increment unit)
-    
-    read :: Counter Int
-    read = liftFree (Read id)
-    
-    reset :: Counter ()
-    reset = liftFree (Reset unit)
+~~~ {.haskell}
+type Counter = Free CounterF
+
+liftFree :: (Functor f) => f a -> Free f a
+liftFree fa = Free . Right . fmap return
+
+increment :: Counter ()
+increment = liftFree (Increment unit)
+
+read :: Counter Int
+read = liftFree (Read id)
+
+reset :: Counter ()
+reset = liftFree (Reset unit)
+~~~
 
 Given these constructors, and the `Monad` instance above, we can construct computations in our new `Counter` monad:
 
-    readAndReset :: Counter Int
-    readAndReset = do
-      current <- read
-      reset
-      return current
+~~~ {.haskell}
+readAndReset :: Counter Int
+readAndReset = do
+  current <- read
+  reset
+  return current
+~~~
 
 Running a computation in the `Counter` monad requires that we give an interpretation for the operations described by the functor
 `CounterF`. We must choose a monad `m` in which to interpret our computation, and then provide a natural transformation from `CounterF`
@@ -120,13 +134,15 @@ to `m`.
 
 One possible implementation might use a `State` monad to keep track of the counter state:
 
-    runCounter :: Counter a -> State Int a
-    runCounter = runFree interpret
-      where
-      interpret :: CounterF a -> State Int a
-      interpret (Increment a) = modify (1 +) >> return a
-      interpret (Read k) = fmap k get
-      interpret (Reset a) = put 0 >> return a
+~~~ {.haskell}
+runCounter :: Counter a -> State Int a
+runCounter = runFree interpret
+  where
+  interpret :: CounterF a -> State Int a
+  interpret (Increment a) = modify (1 +) >> return a
+  interpret (Read k) = fmap k get
+  interpret (Reset a) = put 0 >> return a
+~~~
 
 Other implementations might use the `IO` monad to update a counter on a remote server, or add log messages to the implementation
 above, using the `StateT Int IO` monad transformer stack. This is the power of working with free monads - we have completely
@@ -136,47 +152,55 @@ separated the meaning of our computations from the syntax that describes them.
 
 The free monad construction given above can be generalized to a free monad transformer, `FreeT`:
 
-    newtype FreeT f m a = FreeT { unFreeT :: m (Either a (f (FreeT f m a))) }
+~~~ {.haskell}
+newtype FreeT f m a = FreeT { unFreeT :: m (Either a (f (FreeT f m a))) }
+~~~
 
 The free monad transformer allows us to interleave effects from the base monad `m` at each step of the computation.
 
 The `Functor` and `Monad` instances for `FreeT` look similar to the instances for `Free`. In addition, we now also have an instance for
 `MonadTrans`, the type class of monad transformers:
 
-    instance (Functor f, Functor m) => Functor (FreeT f m) where
-      fmap f = FreeT . fmap (either f (fmap (fmap f))) . unFreeT
-    
-    instance (Functor f, Monad m) => Monad (Co f m) where
-      return a = FreeT (return (Left a))
-      m >>= f = unFreeT m >>= either f (FreeT . return . Right . fmap (>>= f))
-    
-    instance MonadTrans (FreeT f) where
-      lift = FreeT . fmap Left
+~~~ {.haskell}
+instance (Functor f, Functor m) => Functor (FreeT f m) where
+  fmap f = FreeT . fmap (either f (fmap (fmap f))) . unFreeT
+
+instance (Functor f, Monad m) => Monad (Co f m) where
+  return a = FreeT (return (Left a))
+  m >>= f = unFreeT m >>= either f (FreeT . return . Right . fmap (>>= f))
+
+instance MonadTrans (FreeT f) where
+  lift = FreeT . fmap Left
+~~~
 
 The `Counter` operations given above can be lifted to work in the free monad transformer:
 
-    type CounterT = FreeT CounterF
-    
-    liftFreeT :: (Functor f, Monad m) => f a -> FreeT f m a
-    liftFreeT = FreeT . return . Right . fmap return
-    
-    increment :: (Monad m) => CounterT m ()
-    increment = liftFreeT (Increment unit)
-    
-    read :: (Monad m) => CounterT m Int
-    read = liftFreeT (Read id)
-    
-    reset :: (Monad m) => CounterT m ()
-    reset = liftFreeT (Reset unit)
+~~~ {.haskell}
+type CounterT = FreeT CounterF
+
+liftFreeT :: (Functor f, Monad m) => f a -> FreeT f m a
+liftFreeT = FreeT . return . Right . fmap return
+
+increment :: (Monad m) => CounterT m ()
+increment = liftFreeT (Increment unit)
+
+read :: (Monad m) => CounterT m Int
+read = liftFreeT (Read id)
+
+reset :: (Monad m) => CounterT m ()
+reset = liftFreeT (Reset unit)
+~~~
 
 We can now modify our original computation to include console logging, for example:
 
-    readAndReset :: CounterT IO Int
-    readAndReset = do
-      current <- read
-      lift $ putStrLn $ "Current value is " ++ show current"
-      reset
-      return current
+~~~ {.haskell}
+readAndReset :: CounterT IO Int
+readAndReset = do
+  current <- read
+  lift $ putStrLn $ "Current value is " ++ show current"
+  reset
+  return current
+~~~
 
 ## Free Monads in Scala and PureScript
 
@@ -199,11 +223,13 @@ and the `State` monad, or monads which are themselves stack-safe due to some imp
 This technique is also used to implement free monads in PureScript, in the `purescript-free` library, where the data constructor capturing 
 the bind is named `Gosub`:
 
-    newtype GosubF f a b = GosubF (Unit -> Free f b) (b -> Free f a)
-    
-    data Free f a 
-      = Free (Either a (f (Free f a)))
-      | Gosub (Exists (GosubF f a))
+~~~ {.haskell}
+newtype GosubF f a b = GosubF (Unit -> Free f b) (b -> Free f a)
+
+data Free f a 
+  = Free (Either a (f (Free f a)))
+  | Gosub (Exists (GosubF f a))
+~~~
 
 Here, we add the `Gosub` constructor which directly captures the arguments to a monadic bind, existentially hiding the return type `b`
 of the intermediate computation.
@@ -231,36 +257,42 @@ tail-recursive monads. To motivate this abstraction, let's consider tail call el
 The PureScript compiler performs tail-call elimination for self-recursive functions, so that a function like `pow` below, 
 which computes integer powers by recursion, gets compiled into an efficient `while` loop in the generated Javascript.
 
-    pow :: Int -> Int -> Int
-    pow n p = go (Tuple 1 p)
-      where
-      go (Tuple acc 0) = acc
-      go (Tuple acc p) = go (Tuple (acc * n) (p - 1))
+~~~ {.haskell}
+pow :: Int -> Int -> Int
+pow n p = go (Tuple 1 p)
+  where
+  go (Tuple acc 0) = acc
+  go (Tuple acc p) = go (Tuple (acc * n) (p - 1))
+~~~
 
 However, we do not get the same benefit when using monadic recursion. Suppose we wanted to use the `Writer` monad to collect
 the result in the `Product` monoid:
 
-    powWriter :: Int -> Int -> Writer Product Unit
-    powWriter n = go
-      where
-      go 0 = return unit
-      go m = do
-        tell n
-        go (m - 1)
+~~~ {.haskell}
+powWriter :: Int -> Int -> Writer Product Unit
+powWriter n = go
+  where
+  go 0 = return unit
+  go m = do
+    tell n
+    go (m - 1)
+~~~
 
 This time, we see a stack overflow at runtime for large inputs to the `powWriter` function, since the function is no 
 longer tail-recursive: the tail call is now inside the call to the `Writer` monad's bind function.
 
 We can refactor the original `pow` function to isolate the recursive function call:
 
-    tailRec :: forall a b. (a -> Either a b) -> a -> b
-    
-    pow :: Int -> Int -> Int
-    pow n p = tailRec go (Tuple 1 p)
-      where
-      go :: Tuple Int Int -> Either (Tuple Int Int) Number
-      go (Tuple acc 0) = Right acc
-      go (Tuple acc p) = Left (Tuple (acc * n) (p - 1))
+~~~ {.haskell}
+tailRec :: forall a b. (a -> Either a b) -> a -> b
+
+pow :: Int -> Int -> Int
+pow n p = tailRec go (Tuple 1 p)
+  where
+  go :: Tuple Int Int -> Either (Tuple Int Int) Number
+  go (Tuple acc 0) = Right acc
+  go (Tuple acc p) = Left (Tuple (acc * n) (p - 1))
+~~~
 
 Here, the `tailRec` function expresses a generic tail-recursive function, where in the body of the loop, instead of calling the `go`
 function recursively, we return a value using the `Left` constructor. To break from the loop, we use the `Right` constructor.
@@ -268,25 +300,31 @@ function recursively, we return a value using the `Left` constructor. To break f
 `tailRec` itself is implemented using a tail-recursive helper function, which makes this approach very similar to the 
 trampoline approach:
 
-    tailRec :: forall a b. (a -> Either a b) -> a -> b
-    tailRec f a = go (f a)
-      where
-      go (Left a) = go (f a)
-      go (Right b) = b
+~~~ {.haskell}
+tailRec :: forall a b. (a -> Either a b) -> a -> b
+tailRec f a = go (f a)
+  where
+  go (Left a) = go (f a)
+  go (Right b) = b
+~~~
 
 However, type of `tailRec` can be generalized to several monads using the following type class, which is defined in the 
 `purescript-tailrec` library:
 
-    class (Monad m) <= MonadRec m where
-      tailRecM :: forall a b. (a -> m (Either a b)) -> a -> m b
+~~~ {.haskell}
+class (Monad m) <= MonadRec m where
+  tailRecM :: forall a b. (a -> m (Either a b)) -> a -> m b
+~~~
 
 `tailRecM` can actually be implemented for _any_ monad `m`, by modifying the `tailRec` function slightly as follows:
 
-    tailRecM :: forall a b. (a -> m (Either a b)) -> a -> m b
-    tailRecM f a = f a >>= go
-      where
-      go (Left a) = f a >>= go
-      go (Right b) = return b
+~~~ {.haskell}
+tailRecM :: forall a b. (a -> m (Either a b)) -> a -> m b
+tailRecM f a = f a >>= go
+  where
+  go (Left a) = f a >>= go
+  go (Right b) = return b
+~~~
 
 However, this would not necessarily be a valid implementation of the `MonadRec` class, because `MonadRec` comes with an additional
 law: 
@@ -300,7 +338,9 @@ require some slightly more subtle reasoning.
 We can write some helper functions for instances of the `MonadRec` class, such as `forever`, which iterates a monadic action forever, 
 as a variant of the function with the same name from Haskell's standard library:
 
-    forever :: forall m a b. (MonadRec m) => m a -> m b
+~~~ {.haskell}
+forever :: forall m a b. (MonadRec m) => m a -> m b
+~~~
 
 `MonadRec` becomes useful, because it has a surprisingly large number of valid instances: `tailRec` itself gives a valid implementation for
 the `Identity` monad, and there are valid instances for PureScript's `Eff` and `Aff` monads, which are synchronous and asynchronous effect 
@@ -309,18 +349,16 @@ monads similar in some respects to Haskell's `IO`.
 There are also valid `MonadRec` instances for some standard monad transformers: `ExceptT`, `StateT`, `WriterT`, `RWST`, which gives a
 useful generalization of tail recursion to monadic contexts. We can rewrite `powWriter` as the following safe variant, for example:
 
-    powWriter :: Int -> Int -> Writer Product Unit
-    powWriter n = tailRecM go
-      where
-      go :: Int -> Writer Product (Either Int Unit)
-      go 0 = return (Right unit)
-      go m = do
-        tell n
-        return (Left (m - 1))
-
-In [Uustalu], monads supporting a `tailRecM` operation are called _completely iterative_, although the conditions for validity of instances
-is different. There they are used to capture monads supporting the side-effect of _partiality_ in a total language. Our instance for `Identity`
-would be considered unsafe, for example.
+~~~ {.haskell}
+powWriter :: Int -> Int -> Writer Product Unit
+powWriter n = tailRecM go
+  where
+  go :: Int -> Writer Product (Either Int Unit)
+  go 0 = return (Right unit)
+  go m = do
+    tell n
+    return (Left (m - 1))
+~~~
 
 ## Interpreting Free Monads Safely
 
@@ -328,10 +366,12 @@ Tail recursive monads provide a safe alternative to the `runFree` function, whic
 
 Instead of interpreting a free monad in an arbitrary monad `m`, we modify `runFree` to target a monad with a valid `MonadRec` instance:
 
-    runFreeM :: forall f m a. (Functor f, MonadRec m) => 
-                              (f (Free f a) -> m (Free f a)) -> 
-                              Free f a -> 
-                              m a
+~~~ {.haskell}
+runFreeM :: forall f m a. (Functor f, MonadRec m) => 
+                          (f (Free f a) -> m (Free f a)) -> 
+                          Free f a -> 
+                          m a
+~~~
 
 Here, the `MonadRec` instance is used to define a tail-recursive function which unrolls the data structure of monadic binds.
 
@@ -346,15 +386,19 @@ The class of tail recursive monads also allow us to define a safe free monad tra
 
 A naive implementation might look like
 
-    newtype FreeT f m a = FreeT (m (Either a (f (FreeT f m a)))) 
+~~~ {.haskell}
+newtype FreeT f m a = FreeT (m (Either a (f (FreeT f m a)))) 
+~~~
 
 We can apply the same `Gosub` trick from the `Free` monad implementation and apply it to our proposed `FreeT`:
 
-    data GosubF f m b a = GosubF (Unit -> FreeT f m a) (a -> FreeT f m b)
-    
-    data FreeT f m a 
-      = FreeT (Unit -> m (Either a (f (FreeT f m a)))) 
-      | Gosub (Exists (GosubF f m a))
+~~~ {.haskell}
+data GosubF f m b a = GosubF (Unit -> FreeT f m a) (a -> FreeT f m b)
+
+data FreeT f m a 
+  = FreeT (Unit -> m (Either a (f (FreeT f m a)))) 
+  | Gosub (Exists (GosubF f m a))
+~~~
 
 We also thunk the computation under the `Free` constructor, which is necessary to avoid stack overflow during construction.
 
@@ -365,16 +409,20 @@ The difficult problem is how to _run_ a computation once it has been built.
 Instead of allowing interpretation in any monad, we only support interpretation in a monad with a valid `MonadRec` instance. 
 We can reduce the process of interpreting the computation to a tail recursive function in that monad:
 
-    runFreeT :: forall f m a. (Functor f, MonadRec m) => 
-                              (forall a. f a -> m a) -> 
-                              FreeT f m a -> 
-                              m a
+~~~ {.haskell}
+runFreeT :: forall f m a. (Functor f, MonadRec m) => 
+                          (forall a. f a -> m a) -> 
+                          FreeT f m a -> 
+                          m a
+~~~
 
 ## Stack Safety for Free
 
 [Uustalu] defines the _free completely-iterative monad transformer_. In Haskell, it might be defined as:
 
-    newtype IterT m a = IterT { runIterT :: m (Either (IterT f m a) a) }
+~~~ {.haskell}
+newtype IterT m a = IterT { runIterT :: m (Either (IterT f m a) a) }
+~~~
 
 where the fixed point is assumed to be the greatest fixed point.
 
@@ -383,7 +431,9 @@ least fixed point was implied. However, our encoding of the free monad transform
 infinite values, so we can consider our `FreeT Identity m` as embedding in `IterT m`. In PureScript, we will
 take `FreeT Identity` as our encoding of the free completely-iterative monad transformer:
 
-    type IterT = FreeT Identity
+~~~ {.haskell}
+type IterT = FreeT Identity
+~~~
 
 `IterT m` is stack-safe for any monad `m`, thanks to the `Gosub` trick. Also, `IterT m` can be interpreted in
 `m` using `runFreeT return`, and this interpretation is stack-safe whenever `m` is a tail-recursive monad.
@@ -395,23 +445,27 @@ we can use `runFreeT` to move back to `m`.
 
 For example, this computation quickly terminates with a stack overflow:
 
-    main = go 100000
-      where
-      go n | n <= 0 = return unit
-      go n = do
-       print n
-       go (n - 2)
-       go (n - 1)
+~~~ {.haskell}
+main = go 100000
+  where
+  go n | n <= 0 = return unit
+  go n = do
+   print n
+   go (n - 2)
+   go (n - 1)
+~~~
 
 but can be made productive, simply by lifting computations into `IterT`:
 
-    main = runFreeT return $ go 100000
-      where
-      go n | n <= 0 = return unit
-      go n = do
-       lift (print n)
-       go (n - 2)
-       go (n - 1)
+~~~ {.haskell}
+main = runFreeT return $ go 100000
+  where
+  go n | n <= 0 = return unit
+  go n = do
+   lift (print n)
+   go (n - 2)
+   go (n - 1)
+~~~
 
 Note that this would not be possible by using a trampolined free monad, since the `Eff` monad has no equivalent 
 monad transformer.
@@ -424,22 +478,26 @@ can take place when a coroutine suspends.
 For example, we can define a base functor `Emit` which supports a single operation at suspension - emitting a single output value. 
 In PureScript, it would look like this:
 
-    data Emit o a = Emit o a
-    
-    instance functorEmit :: Functor (Emit o) where
-      map f (Emit o a) = Emit o (f a)
+~~~ {.haskell}
+data Emit o a = Emit o a
+
+instance functorEmit :: Functor (Emit o) where
+  map f (Emit o a) = Emit o (f a)
+~~~
 
 We can define a type `Producer` of coroutines which produce values and perform console IO at suspension:
 
-    type Producer o = FreeT (Emit o) (Eff (console :: CONSOLE))
-    
-    emit :: o -> Producer o Unit
-    emit o = liftFreeT (Emit o unit)
-    
-    producer :: Producer String Unit
-    producer = forever do
-      lift (log "Emitting a value...")
-      emit "Hello World"
+~~~ {.haskell}
+type Producer o = FreeT (Emit o) (Eff (console :: CONSOLE))
+
+emit :: o -> Producer o Unit
+emit o = liftFreeT (Emit o unit)
+
+producer :: Producer String Unit
+producer = forever do
+  lift (log "Emitting a value...")
+  emit "Hello World"
+~~~
 
 We can vary the underlying `Functor` to construct coroutines which produce values, consume values, fork child coroutines, 
 join coroutines, and combinations of these. This is described in [Blazevic], where free monad _transformers_ are used to build a 
@@ -448,27 +506,33 @@ library of composable coroutines and combinators which support effects in some b
 Given a stack-safe implementation of the free monad transformer, it becomes simple to translate the coroutines defined in [Blazevic]
 into PureScript. We can define a functor for awaiting values, and a coroutine type `Consumer`:
 
-    data Await i a = Await (i -> a)
-    
-    instance functorAwait :: Functor (Await i) where
-      map f (Await k) = Await (f <<< k)
-    
-    type Consumer i = FreeT (Await i) (Eff (console :: CONSOLE))
-    
-    await :: forall i. Consumer i i
-    await o = liftFreeT (Await id)
+~~~ {.haskell}
+data Await i a = Await (i -> a)
+
+instance functorAwait :: Functor (Await i) where
+  map f (Await k) = Await (f <<< k)
+
+type Consumer i = FreeT (Await i) (Eff (console :: CONSOLE))
+
+await :: forall i. Consumer i i
+await o = liftFreeT (Await id)
+~~~
 
 Here is an example of a `Consumer` which repeatedly awaits a new value before logging it to the console:
 
-    consumer :: forall a. (Show a) => Consumer a Unit
-    consumer = forever do
-      s <- await
-      lift (print s)
+~~~ {.haskell}
+consumer :: forall a. (Show a) => Consumer a Unit
+consumer = forever do
+  s <- await
+  lift (print s)
+~~~
 
 The use of the safe `FreeT` implementation, and `MonadRec` make these coroutines stack-safe. They can be connected and run 
 using a constant amount of stack:
 
-    main = runFreeT id (producer $$ consumer)
+~~~ {.haskell}
+main = runFreeT id (producer $$ consumer)
+~~~
 
 `$$` is an operator defined in the `purescript-coroutines` library, which supports a handful of combinators for connecting producers, 
 consumers and transformers, as well as more powerful, generic coroutine machinery taken from [Blazevic]. Running this example will generate
@@ -487,55 +551,73 @@ By a control operator, we are referring to functions such as `mapM_`, `foldM`, `
 
 Consider, for example, the following definition of `replicateM_`, which replicates a monadic action some number of times, ignoring its results:
 
-    replicateM_ :: forall m a. (Monad m) => Int -> m a -> m Unit
-    replicateM_ 0 _ = return Nil
-    replicateM_ n m = do
-      _ <- m
-      replicateM (n - 1) m
+~~~ {.haskell}
+replicateM_ :: forall m a. (Monad m) => Int -> m a -> m Unit
+replicateM_ 0 _ = return Nil
+replicateM_ n m = do
+  _ <- m
+  replicateM (n - 1) m
+~~~
 
 This function is not stack-safe for large inputs. There is a simple, safe implementation of `replicateM` where the `Monad` constraint 
 is strengthened to `MonadRec`, but for the purposes of demonstration, let's see how we can _derive_ a safe `replicateM` instead, using `IterT`.
 
 It is as simple as lifting our monadic action from `m` to `IterT m` before the call to `replicateM`, and lowering it down using `runFreeT return` afterwards:
 
-    safeReplicateM_ :: forall m a. (MonadRec m) => Int -> m a -> m Unit
-    safeReplicateM_ n m = runFree return (replicateM_ n (lift m))
+~~~ {.haskell}
+safeReplicateM_ :: forall m a. (MonadRec m) => Int -> m a -> m Unit
+safeReplicateM_ n m = runFree return (replicateM_ n (lift m))
+~~~
 
 We can even capture this general technique as follows. The `Operator` type class captures those functions which work on arbitrary monads, i.e. 
 control operators:
 
-    type MMorph f g = forall a. f a -> g a
-    
-    class Operator o where
-      mapO :: forall m n. MMorph m n -> MMorph n m -> o m -> o n
+~~~ {.haskell}
+type MMorph f g = forall a. f a -> g a
+
+class Operator o where
+  mapO :: forall m n. MMorph m n -> MMorph n m -> o m -> o n
+~~~
 
 Here, `MMorph` represents a monad morphism. `mapO` is given a pair of monad morphisms representing an embedding-retraction pair, and is responsible for
 changing the monad being operated on accordingly.
 
 In practice, our two monads will be `m` and `IterT m` for some tail recursive monad `m`:
 
-    safely :: forall o m a. (Operator o, MonadRec m) => 
-                            (forall t. (Monad t) => o t) -> 
-                            o m
-    safely o = mapO runProcess lift o
+~~~ {.haskell}
+safely :: forall o m a. (Operator o, MonadRec m) => 
+                        (forall t. (Monad t) => o t) -> 
+                        o m
+safely o = mapO runProcess lift o
+~~~
 
 `safely` allows us to write a control operator for any `Monad`, trading the generality of a `Monad` constraint for the ability to be able to write code
 which is not necessarily stack-safe, and returns an equivalent combinator which works with any `MonadRec`, safely.
 
 Given this combinator, we can reimplement our safe version of `replicateM_` by defining a wrapper type and an instance of `Operator`:
 
-    newtype Replicator m = Replicator (forall a. Int -> m a -> m Unit)
-    
-    instance replicator :: Operator Replicator where
-      mapO to fro (Replicator r) = Replicator \n m -> to (r n (fro m))
-    
-    runReplicator :: forall m a. Replicator m -> Int -> m a -> m Unit
-    runReplicator (Replicator r) = r
-    
-    safeReplicateM_ :: forall m a. (MonadRec m) => Int -> m a -> m Unit
-    safeReplicateM_ = runReplicator (safely (Replicator replicateM_)) 
+~~~ {.haskell}
+newtype Replicator m = Replicator (forall a. Int -> m a -> m Unit)
+
+instance replicator :: Operator Replicator where
+  mapO to fro (Replicator r) = Replicator \n m -> to (r n (fro m))
+
+runReplicator :: forall m a. Replicator m -> Int -> m a -> m Unit
+runReplicator (Replicator r) = r
+
+safeReplicateM_ :: forall m a. (MonadRec m) => Int -> m a -> m Unit
+safeReplicateM_ = runReplicator (safely (Replicator replicateM_)) 
+~~~
 
 We can use the `safely` combinator to derive safe versions of many other control operators automatically.
+
+## Further Reading
+
+In [Uustalu], monads supporting a `tailRecM` operation are called _completely iterative_, although the conditions for validity of instances
+is different. There they are used to capture monads supporting the side-effect of _partiality_ in a total language. Our instance for `Identity`
+would be considered unsafe, for example.
+
+## Conclusion
 
 ## References
 
