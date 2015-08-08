@@ -8,15 +8,49 @@ abstract: |
   model of the host language. This paper develops a stack-safe free monad transformer in _PureScript_,
   an eager language compiling to Javascript, and demonstrates certain applications -
   a safe implementation of coroutines, and a generic mechanism for building stack-safe control operators.
+references:
+- type: webpage
+  id: Scalaz
+  title: 'Scalaz project GitHub repository'
+  title-short: Scalaz
+  URL: https://github.com/scalaz/scalaz
+  language: en-GB
+- type: article
+  id: Blazevic
+  author:
+  - family: Blažević
+    given: Mario
+  title: 'Coroutine Pipelines'
+  title-short: 'Coroutine Pipelines'
+  container-title: The Monad Reader
+  issue: 19
+  language: en-GB
+- type: article
+  id: Bjarnason
+  title: 'Stackless Scala With Free Monads'
+  title-short: 'Stackless Scala With Free Monads'
+  author:
+  - family: Bjarnason
+    given: Rúnar Óli
+- type: webpage
+  id: Partiality
+  title: 'Partiality is an Effect'
+  title-short: 'Partiality is an Effect'
+  author:
+  - family: Capretta
+    given: Venanzio 
+  - family: Altenkirch
+    given: Thorsten
+  - family: Uustalu
+    given: Tarmo
 ---
 
 ## Introduction
 
 Techniques from pure functional programming languages such as Haskell have been making their way into mainstream
-programming, slowly but surely, in the form of projects like [Scalaz] in Scala, and packages
-like [Fantasy Land] and [FolkTale] in Javascript. Abstractions such as monoids, functors, applicative functors, monads,
-arrows, etc. afford a level of expressiveness which can give great productivity gains, and improved guarantees of
-program correctness. 
+programming, slowly but surely, in the form of projects like @Scalaz in Scala. Abstractions such as monoids, functors, 
+applicative functors, monads, arrows, etc. afford a level of expressiveness which can give great productivity gains, 
+and improved guarantees of program correctness. 
 
 However, naive implementations of these abstractions can lead to poor performance, depending on the evaluation order of the 
 host language. In particular, deeply recursive code can lead to _stack overflow_.
@@ -212,7 +246,7 @@ In an eager language, it is not necessarily possible to even build a large compu
 has to traverse the tree to its leaves.
 
 Fortunately, a solution to this problem has been known to the Scala community for some time. 
-[2] describes how to defer monadic binds in the free monad, by capturing binds as a data structure. `runFree` can then be
+@Bjarnason describes how to defer monadic binds in the free monad, by capturing binds as a data structure. `runFree` can then be
 implemented as a tail recursive function, interpreting this structure of deferred monadic binds, 
 giving a free monad implementation which supports deep recursion.
 
@@ -234,10 +268,10 @@ data Free f a
 Here, we add the `Gosub` constructor which directly captures the arguments to a monadic bind, existentially hiding the return type `b`
 of the intermediate computation.
 
-By translating the implementation in [2], `purescript-free` builds a stack-safe free monad implementation for PureScript, which
+By translating the implementation in @Bjarnason, `purescript-free` builds a stack-safe free monad implementation for PureScript, which
 has been used to construct several useful libraries.
 
-However, in [2], when discussing the extension to a monad transformer, it is correctly observed that:
+However, in @Bjarnason, when discussing the extension to a monad transformer, it is correctly observed that:
 
 > In the present implementation in Scala, it's necessary to forego the parameterization on an additional monad, in order to
 > preserve tail call elimination. Instead of being written as a monad transformer itself, Free could be transformed by a monad 
@@ -418,7 +452,7 @@ runFreeT :: forall f m a. (Functor f, MonadRec m) =>
 
 ## Stack Safety for Free
 
-[Uustalu] defines the _free completely-iterative monad transformer_. In Haskell, it might be defined as:
+@Partiality defines the _free completely-iterative monad transformer_. In Haskell, it might be defined as:
 
 ~~~ {.haskell}
 newtype IterT m a = IterT { runIterT :: m (Either (IterT f m a) a) }
@@ -500,10 +534,10 @@ producer = forever do
 ~~~
 
 We can vary the underlying `Functor` to construct coroutines which produce values, consume values, fork child coroutines, 
-join coroutines, and combinations of these. This is described in [Blazevic], where free monad _transformers_ are used to build a 
+join coroutines, and combinations of these. This is described in @Blazevic, where free monad _transformers_ are used to build a 
 library of composable coroutines and combinators which support effects in some base monad. 
 
-Given a stack-safe implementation of the free monad transformer, it becomes simple to translate the coroutines defined in [Blazevic]
+Given a stack-safe implementation of the free monad transformer, it becomes simple to translate the coroutines defined in @Blazevic
 into PureScript. We can define a functor for awaiting values, and a coroutine type `Consumer`:
 
 ~~~ {.haskell}
@@ -535,7 +569,7 @@ main = runFreeT id (producer $$ consumer)
 ~~~
 
 `$$` is an operator defined in the `purescript-coroutines` library, which supports a handful of combinators for connecting producers, 
-consumers and transformers, as well as more powerful, generic coroutine machinery taken from [Blazevic]. Running this example will generate
+consumers and transformers, as well as more powerful, generic coroutine machinery taken from @Blazevic. Running this example will generate
 an infinite stream of the string `"Hello World"` printed to the console, interleaved with the debug message `"Emitting a value..."`.
 
 In a pure functional language like PureScript, targeting a single-threaded language like Javascript, coroutines built using `FreeT` 
@@ -611,18 +645,11 @@ safeReplicateM_ = runReplicator (safely (Replicator replicateM_))
 
 We can use the `safely` combinator to derive safe versions of many other control operators automatically.
 
-## Further Reading
+## Conclusion and Further Reading
 
-In [Uustalu], monads supporting a `tailRecM` operation are called _completely iterative_, although the conditions for validity of instances
+In @Partiality, monads supporting a `tailRecM` operation are called _completely iterative_, although the conditions for validity of instances
 is different. There they are used to capture monads supporting the side-effect of _partiality_ in a total language. Our instance for `Identity`
 would be considered unsafe, for example.
 
-## Conclusion
-
 ## References
 
-- \[Scalaz\]: Scalaz GitHub repository 
-  [github.com/scalaz/scalaz](https://github.com/scalaz/scalaz)
-- \[Blazevic\]: Coroutine Pipelines, by Mario Blazevic, in The Monad Reader, Issue 19.
-- \[Bjarnason\]: Stackless Scala With Free Monads, by Runar Oli Bjarnason.
-- \[Uustalu\]: Partiality is an Effect, by Venanzio Capretta, Thorsten Altenkirch and Tarmo Uustalu.
