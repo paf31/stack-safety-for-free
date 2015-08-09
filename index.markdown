@@ -608,7 +608,7 @@ Consider, for example, the following definition of `replicateM_`, which replicat
 
 ~~~ {.haskell}
 replicateM_ :: forall m a. (Monad m) => Int -> m a -> m Unit
-replicateM_ 0 _ = return Nil
+replicateM_ 0 _ = return unit
 replicateM_ n m = do
   _ <- m
   replicateM (n - 1) m
