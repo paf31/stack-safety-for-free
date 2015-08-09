@@ -671,7 +671,7 @@ We can use the `safely` combinator to derive safe versions of many other control
 
 ### Completely-Iterative Monads
 
-In [\[Capretta\]](#refs), the type of `tailRecM` appears in the definition of a _completely-iterative monad_, and seem to solve a similar problem. Where tail-recursive monads are used to perform stack-safe monadic recursion in a strict language like PureScript, where the evaluation model leads to stack overflow, completely-iterative monads provide the ability to use iteration in total languages where non-termination is considered an effect.
+In [\[Capretta\]](#refs), the type of `tailRecM` appears in the definition of a _completely-iterative monad_. Completely-iterative monads seem to solve a related problem: where tail-recursive monads enable stack-safe monadic recursion in a strict language like PureScript, where the evaluation model leads to stack overflow, completely-iterative monads provide the ability to use iteration in total languages where non-termination is considered an effect.
 
 Our `SafeT` monad transformer looks suspiciously similar to the _free completely-iterative monad_, defined as:
 
