@@ -492,7 +492,7 @@ main = go 100000
    go (n - 1)
 ~~~
 
-but can be made productive, simply by lifting computations into `IterT`:
+but can be made productive, simply by lifting computations into `SafeT`:
 
 ~~~ {.haskell}
 main :: Eff (console :: CONSOLE) Unit
@@ -676,7 +676,7 @@ In [\[Capretta\]](#refs), the type of `tailRecM` appears in the definition of a 
 Our `SafeT` monad transformer looks suspiciously similar to the _free completely-iterative monad_, defined as:
 
 ~~~ {.haskell}
-newtype IterT m a = IterT (m (Either (IterT f m a) a))
+newtype IterT m a = IterT (m (Either a (IterT m a)))
 ~~~
 
 where the fixed point is assumed to be the greatest fixed point.
