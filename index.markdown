@@ -602,7 +602,7 @@ In a pure functional language like PureScript, targeting a single-threaded langu
 The fact that `SafeT m` is stack-safe for any monad `m` provides a way to turn implementations of _control operators_ with poor stack
 usage, into implementations with good stack usage for free.
 
-By a control operator, we mean functions like `mapM_`, `foldM`, `replicateM` and `iterateM`, which work over an arbitrary monad.
+By a control operator, we mean functions like `mapM_`, `foldM`, `replicateM_` and `iterateM`, which work over an arbitrary monad.
 
 Consider, for example, the following definition of `replicateM_`, which replicates a monadic action some number of times, ignoring its results:
 
@@ -611,11 +611,11 @@ replicateM_ :: forall m a. (Monad m) => Int -> m a -> m Unit
 replicateM_ 0 _ = return unit
 replicateM_ n m = do
   _ <- m
-  replicateM (n - 1) m
+  replicateM_ (n - 1) m
 ~~~
 
-This function is not stack-safe for large inputs. There is a simple, safe implementation of `replicateM` where the `Monad` constraint 
-is strengthened to `MonadRec`, but for the purposes of demonstration, let's see how we can _derive_ a safe `replicateM` instead, using `SafeT`.
+This function is not stack-safe for large inputs. There is a simple, safe implementation of `replicateM_` where the `Monad` constraint 
+is strengthened to `MonadRec`, but for the purposes of demonstration, let's see how we can _derive_ a safe `replicateM_` instead, using `SafeT`.
 
 It is as simple as lifting our monadic action from `m` to `SafeT m` before the call to `replicateM`, and lowering it down using `runSafeT` afterwards:
 
