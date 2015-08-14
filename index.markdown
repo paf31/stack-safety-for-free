@@ -228,7 +228,7 @@ Additionally, in [\[Bjarnason\]](#refs), when discussing the extension to a mona
 That is, it is not clear how to extend the `Gosub` technique to the free monad _transformer_ if we want to be able to transform 
 an arbitrary monad.
 
-The approach of putting using another monad transformer to transform `Free` is strictly less expressive than
+The approach of using another monad transformer to transform `Free` is strictly less expressive than
 using the free monad transformer, since we would be unable to transform monads which did not have an equivalent transformer, such as `Eff`.
 
 A variant of this technique is used to implement free monads in PureScript, in the `purescript-free` library.
