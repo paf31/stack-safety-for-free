@@ -4,10 +4,11 @@ author: Phil Freeman
 date:   August 8, 2015
 abstract: |
   Free monads are a useful tool for abstraction, separating specification from interpretation.
-  However, a naive free monad implementation can lead to stack overflow depending on the evaluation
+  However, a naïve free monad implementation can lead to stack overflow depending on the evaluation
   model of the host language. This paper develops a stack-safe free monad transformer in _PureScript_,
   a strict Haskell-like language compiling to Javascript, and demonstrates certain applications -
-  a safe implementation of coroutines, and a generic mechanism for building stack-safe control operators.
+  a safe implementation of coroutines, a safe list monad transformer, and a generic mechanism for 
+  building stack-safe control operators.
 ---
 
 ## Introduction
@@ -16,14 +17,14 @@ Techniques from pure functional programming languages such as Haskell have been 
 programming, slowly but surely. Abstractions such as monoids, functors, applicative functors, monads, arrows, etc. 
 afford a level of expressiveness which can give great productivity gains, and improved guarantees of program correctness. 
 
-However, naive implementations of these abstractions can lead to poor performance, depending on the evaluation order of the 
+However, naïve implementations of these abstractions can lead to poor performance, depending on the evaluation order of the 
 host language. In particular, deeply recursive code can lead to _stack overflow_.
 
 One example of a desirable abstraction is the _free monad_ for a functor `f`. Free monads allow us to separate the specification
 of a monad (by specifying the base functor `f`), from its implementation. In this paper, we will develop a safe implementation of
 free monad and the equivalent _monad transformer_ in [\[PureScript\]](#refs), a strict Haskell-like language which compiles to Javascript.
 
-A naive implementation of the free monad in PureScript might look like this:
+A naïve implementation of the free monad in PureScript might look like this:
 
 ~~~ {.haskell}
 newtype Free f a = Free (Either a (f (Free f a)))
@@ -210,7 +211,7 @@ readAndResetT = do
 
 ## Deferring Monadic Binds
 
-The naive implementation of `Free` given above works for small computations such as `readAndReset` example. However, the `runFree` function is not tail recursive, and so interpreting large computations often results in _stack overflow_. Techniques such as monadic recursion become unusable.
+The naïve implementation of `Free` given above works for small computations such as `readAndReset` example. However, the `runFree` function is not tail recursive, and so interpreting large computations often results in _stack overflow_. Techniques such as monadic recursion become unusable.
 It is not necessarily possible to even _build_ a large computation using `Free`, let alone evaluate it, since each monadic bind has to traverse the tree to its leaves.
 
 Fortunately, a solution to this problem has been known to the [\[Scala\]](#refs) community for some time. 
@@ -346,7 +347,29 @@ forever :: forall m a b. (MonadRec m) => m a -> m b
 ~~~
 
 `MonadRec` becomes useful because it has a surprisingly large number of valid instances: `tailRec` itself gives a valid implementation for
-the `Identity` monad, and there are valid instances for PureScript's `Eff` and `Aff` monads. There are also valid `MonadRec` instances for some standard monad transformers: `ExceptT`, `ReaderT`, `StateT`, `WriterT`, and `RWST`. 
+the `Identity` monad, and there are valid instances for PureScript's `Eff` and `Aff` monads.
+
+There are also valid `MonadRec` instances for some standard monad transformers: `ExceptT`, `ReaderT`, `StateT`, `WriterT`, and `RWST`. For example, here is an
+instance for the state monad transformer:
+
+~~~ {.haskell}
+instance monadRecStateT :: (MonadRec m) => MonadRec (StateT s m) where
+  tailRecM f a = StateT \s -> tailRecM f' (Tuple a s)
+    where
+    f' (Tuple a s) = do
+      Tuple m s1 <- runStateT (f a) s
+      return case m of
+        Left a -> Left (Tuple a s1)
+        Right b -> Right (Tuple b s1)
+~~~
+
+Note that this instance defers to the `tailRecM` function for the base monad, and that `tailRecM` is used to express all recursion. Thus, the correctness of this instance is given by the correctness of the implied `MonadRec` instance for the base monad `m`.
+
+Instances of `MonadRec` for monad transformers correspond to various variants on standard tail recursion:
+
+- Tail recursion for `StateT` corresponds to adding an _accumulator parameter_.
+- Tail recursion for `WriterT` can be seen as a generalization of _tail-recursion modulo cons_, since we build an additional monoidal result before the recursive call.
+- Tail recursion for `ExceptT` corresponds to tail recursion in which we can terminate recursion early, returning some error.
 
 `MonadRec` gives a useful generalization of tail recursion to monadic contexts. We can rewrite `powWriter` as the following safe variant, for example:
 
@@ -399,7 +422,7 @@ We have enlarged our space of valid target monads to a collection closed under s
 
 The class of tail-recursive monads also allow us to define a safe free monad transformer in PureScript.
 
-We can apply the `Gosub` technique to our naive implementation of `FreeT`:
+We can apply the `Gosub` technique to our naïve implementation of `FreeT`:
 
 ~~~ {.haskell}
 data GosubF f m b a = GosubF (Unit -> FreeT f m a) (a -> FreeT f m b)
@@ -597,6 +620,111 @@ Running this example will generate an infinite stream of `"Hello World"` message
 
 In a pure functional language like PureScript, targeting a single-threaded language like Javascript, coroutines built using `FreeT` might provide a natural way to implement cooperative multithreading, or to interact with a runtime like NodeJS for performing tasks like non-blocking file and network IO.
 
+## Application: List Monad Transformer
+
+The _list monad transformer_ `ListT` can be used to represent non-deterministic computations with underlying side-effects described by some base monad. 
+Effects in the base monad may or may not be required, depending on the number of elements required from the final list of successes. For example,
+a search algorithm might require data from a server, but we would like to minimize the number of round-trips required, if we only require one
+successful result. Such a problem would be a natural fit for a list monad transformer over an asynchronous monad such as PureScript's `Aff` monad.
+
+Unfortunately, it is not obvious how to construct a stack-safe list monad transformer. However, we can lean on our new free monad transformer, as we'll see.
+
+To see the connection to the free monad transformer, consider the following naïve implementation of `ListT`:
+
+~~~ {.haskell}
+data ListF a t = Nil | Cons a t
+
+newtype ListT m a = ListT (m (ListF a (ListT m a)))
+~~~
+
+`ListT` looks like a variant of a cons list, expressed using explicit recursion over a signature functor `ListF`. However, effects from the base monad 
+`m` are allowed every time a new cons cell is constructed.
+
+Adding an additional parameter at the end of the list of cons cells makes the connection to `FreeT` clearer:
+
+~~~ {.haskell}
+data ListF a r t = Nil r | Cons a t
+
+newtype ListT m a r = ListT (m (ListF a r (ListT m a r)))
+~~~
+
+The type `ListT m a r` is isomorphic to `FreeT (Emit a) m r` via various simple substitutions. In other words, we can model `ListT` using a free monad transformer by restricting the result type of a producer:
+
+~~~ {.haskell}
+newtype ListT m a = ListT (Producer a m Unit)
+~~~
+
+We can run a computation in our hypothetical `ListT` monad by using a writer monad transformer to accumulate multiple results:
+
+~~~ {.haskell}
+runListT :: forall m a. (MonadRec m) => ListT m a -> m (List a)
+runListT (ListT producer) = 
+  execWriterT $ 
+    hoistFreeT lift producer $$ consumer
+  where
+  consumer :: Consumer a (WriterT (List a)) Unit
+  consumer = forever do
+    a <- await
+    lift (tell (singleton a))
+~~~
+
+Here, `hoistFreeT` allows us to change the base monad under a free monad transformer using a natural transformation:
+
+~~~ {.haskell}
+hoistFreeT :: forall f m n a. 
+  (Functor f, Functor n) => 
+  (forall a. m a -> n a) -> 
+  FreeT f m a -> 
+  FreeT f n a
+~~~
+
+Note that the call to `runFreeT` is acceptable since `WriterT w m` is an instance of `MonadRec` whenever `m` is.
+
+It is possible to write `Functor`, `Applicative` and `Monad` instances for the new `ListT`, although the details are omitted here. 
+It is also possible to write functions which allow us to express non-deterministic computations:
+
+~~~ {.haskell}
+nat :: forall m. (Monad m) => ListT m Int
+
+oneOf :: forall m a. (Monad m) => List a -> ListT m a
+
+empty :: forall m a. (Monad m) => ListT m a
+~~~
+
+- `nat` represents a computation which succeeds non-deterministically with some natural number as the result. It is implemented as a producer which emits the naturals in order.
+- `oneOf` represents a non-deterministic computation with one of a list of possible successful results. It is implemented as a producer which emits each of the elements in the input list in order.
+- `empty` represents a computation which fails. It is implemented as a producer which halts immediately without emitting any values.
+
+We can also implement a variant of the standard `zip` function for `ListT` by fusing two producers using `fuseWith`.
+
+Implementing the `filter` function is possible if we add an additional operator to the base functor for our producers:
+
+~~~ {.haskell}
+data EmitMaybe o a = Emit o a | Stall a
+
+newtype ListT m a = ListT (FreeT (EmitMaybe a) m Unit)
+~~~
+
+`filter` replaces each `Emit` with `Stall` whenever the coroutine suspends and the emitted value fails to match the input predicate.
+
+We can now write long-running computations using our `ListT` monad without worrying about stack overflow. 
+For example, this program enumerates an infinite collection of Pythagorean triples and prints them to the console as they are found:
+
+~~~ {.haskell}
+triples :: ListT (Eff (console :: CONSOLE | eff)) (Array Int)
+triples = do
+  x <- nat
+  y <- oneOf (1 .. x)
+  z <- oneOf (1 .. y)
+  if (x * x == y * y + z * z)
+    then do lift $ print [x, y, z]
+            return [x, y, z]
+    else none
+~~~
+
+The caller can incorporate this search into some larger program, and prune the final search tree, running only those side-effects
+which are necessary to produce some finite result.
+
 ## Application: Lifting Control Operators
 
 The fact that `SafeT m` is stack-safe for any monad `m` provides a way to turn implementations of _control operators_ with poor stack
@@ -682,12 +810,6 @@ newtype IterT m a = IterT (m (Either a (IterT m a)))
 where the fixed point is assumed to be the greatest fixed point.
 
 This connection might be worth investigating further.
-
-### Extension to Other Monads
-
-The class of tail-recursive monads is closed under some useful monad transformers, but is missing some standard monads. For example, it is not obvious how to implement `MonadRec` safely for the `List` monad
-
-Perhaps it is possible to identify a larger class of monads which still support the construction of a safe free monad transformer.
 
 ## References {#refs}
 
